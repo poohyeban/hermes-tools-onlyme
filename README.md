@@ -30,10 +30,16 @@ MCP 构建会按 `requirements.lock` 下载 wheel 并校验每个 SHA-256。更�
 
 ## 在部署机器拉取
 
-私有包需要具有包读取权限的凭据。使用可读取该包且具有 `read:packages` 的 classic PAT，在部署机器的交互式密码提示中输入。将下面的占位符换成实际值。
+两个镜像均为公开 GHCR 包，可以匿名拉取。将占位符换成仓库所有者、仓库名和构建摘要。
 
 ```sh
-docker login ghcr.io -u <github-account>
+docker pull ghcr.io/<owner>/<repository>/opensandbox-mcp:1.2.0
+docker pull ghcr.io/<owner>/<repository>/tailnet-runtime:2
+```
+
+生产部署与恢复使用固定摘要：
+
+```sh
 docker pull ghcr.io/<owner>/<repository>/opensandbox-mcp@sha256:<digest>
 docker pull ghcr.io/<owner>/<repository>/tailnet-runtime@sha256:<digest>
 ```
