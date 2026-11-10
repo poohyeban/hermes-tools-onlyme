@@ -1,0 +1,72 @@
+name: Build and publish images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'opensandbox-mcp/**'
+      - 'tailnet-runtime/**'
+      - '.github/workflows/images.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: opensandbox-mcp
+            version: '1.2.0'
+          - component: tailnet-runtime
+            version: '2'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Build and smoke test
+        shell: bash
+        env:
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY,,}/$COMPONENT:git-$GITHUB_SHA"
+          echo "IMAGE=$image" >> "$GITHUB_ENV"
+          docker buildx build --platform linux/amd64 --provenance=false --load \
+            --tag "$image" "$COMPONENT"
+          case "$COMPONENT" in
+            opensandbox-mcp)
+              docker run --rm --network none "$image" --help | grep -F streamable-http
+              docker run --rm --network none --entrypoint /opt/osb-mcp/bin/pip "$image" check
+              ;;
+            tailnet-runtime)
+              docker run --rm --network none --user 65532:65532 "$image" \
+                sh -ec 'test "$(id -u)" = 65532 && python3 --version && ssh -V'
+              ;;
+          esac
+
+      - name: Publish and verify digest
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ matrix.version }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          trap 'docker logout ghcr.io >/dev/null' EXIT
+          version_tag="${IMAGE%:*}:$VERSION"
+          docker tag "$IMAGE" "$version_tag"
+          docker push "$IMAGE"
+          docker push "$version_tag"
+          digest=$(docker buildx imagetools inspect "$IMAGE" --format '{{.Manifest.Digest}}')
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          pinned="${IMAGE%:*}@$digest"
+          docker pull "$pinned"
+          test "$(docker image inspect --format '{{.Id}}' "$IMAGE")" = \
+               "$(docker image inspect --format '{{.Id}}' "$pinned")"
+          echo "Verified image: \`$pinned\`" >> "$GITHUB_STEP_SUMMARY"
